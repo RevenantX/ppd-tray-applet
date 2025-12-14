@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Power Profiles Daemon Tray Applet
+Comment=A simple tray applet for power-profiles-daemon to manage power profiles
+Exec=/home/revenantx/Projects/ppd-tray-applet/ppd-tray-applet
+Icon=system-run-symbolic
+Terminal=false
+Type=Application
+Categories=Utility;System;
+StartupNotify=false
