@@ -1,7 +1,7 @@
 # PPD Tray Applet 
 ![Balanced Profile](assets/balanced.png)
 
-A simple tray applet for [power-profiles-daemon](https://github.com/power-profiles-daemon/power-profiles-daemon) to manage power profiles from your system tray.
+A simple tray applet for [power-profiles-daemon](https://gitlab.freedesktop.org/upower/power-profiles-daemon) to manage power profiles from your system tray.
 
 ## Features
 
