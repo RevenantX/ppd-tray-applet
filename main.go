@@ -10,8 +10,20 @@ import (
 	"fyne.io/systray"
 )
 
+var dbusClient *ppd.Client
+
 func main() {
+	//connect to dbus
+	var err error
+	dbusClient, err = ppd.Connect()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	onExit := func() {
+		if dbusClient != nil {
+			_ = dbusClient.Close()
+		}
 		fmt.Println("Exit application")
 		os.Exit(0)
 	}
@@ -22,47 +34,53 @@ func main() {
 func onReady() {
 	systray.SetTooltip("Power Profiles Daemon mini Tray applet")
 
-	//connect to dbus
-	client, err := ppd.Connect()
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer client.Close()
-
-	active, err := client.ActiveProfile()
+	active, err := dbusClient.ActiveProfile()
 	if err != nil {
 		log.Fatal(err)
 	}
 	//fmt.Printf("ActiveProfile: %s\n\n", active)
 
-	profiles, err := client.Profiles()
+	profiles, err := dbusClient.Profiles()
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	fmt.Println("Available profiles:")
 	for _, m := range profiles {
-		profile := m["Profile"]
-		driver := m["Driver"]
-		fmt.Printf("  - %v (driver=%v)\n", profile.Value(), driver.Value())
+		fmt.Printf("  - %v (driver=%v)\n", m["Profile"], m["Driver"])
 	}
 
 	// Create menu items dynamically from available profiles
-	var profileItems []*systray.MenuItem
+	profileItems := make([]*systray.MenuItem, 0, len(profiles))
 
-	// Store profile names to properly map clicks back to the right profile
-	profileNames := make([]string, len(profiles))
-
-	for i, m := range profiles {
+	for _, m := range profiles {
 		profileName := m["Profile"].Value().(string)
-		profileNames[i] = profileName
 		profileItem := systray.AddMenuItemCheckbox(profileName, fmt.Sprintf("Set %s power profile", profileName), active == profileName)
-		if profileIcon, ok := assets.Images[profileName]; ok {
-			profileItem.SetIcon(profileIcon)
-			if active == profileName {
-				systray.SetIcon(profileIcon)
-			}
+		profileIcon := getIconForProfile(profileName)
+		if active == profileName {
+			systray.SetIcon(profileIcon)
+			fmt.Printf("SetSystray icon: %s\n", profileName)
 		}
+
+		profileItem.SetIcon(profileIcon)
 		profileItems = append(profileItems, profileItem)
+		go func(profileName string, menuItem *systray.MenuItem) {
+			for range menuItem.ClickedCh {
+				if dbusClient == nil {
+					log.Printf("DBus client not ready")
+					continue
+				}
+				if err := dbusClient.SetActiveProfile(profileName); err != nil {
+					log.Printf("Failed to set active profile to %s: %v", profileName, err)
+				} else {
+					for _, otherMenuItem := range profileItems {
+						otherMenuItem.Uncheck()
+					}
+					menuItem.Check()
+					systray.SetIcon(getIconForProfile(profileName))
+				}
+			}
+		}(profileName, profileItem)
 	}
 
 	// Add separator
@@ -71,42 +89,18 @@ func onReady() {
 	// Create the quit menu item first (this is important)
 	quitItem := systray.AddMenuItem("Quit", "Exit application")
 
-	// Handle menu item clicks with individual goroutines for each item
-	for i, item := range profileItems {
-		go func(profileName string, menuItem *systray.MenuItem) {
-			for range menuItem.ClickedCh {
-				var client *ppd.Client
-				var err error
-				client, err = ppd.Connect()
-				if err != nil {
-					log.Printf("Failed to connect: %v", err)
-					continue
-				}
-
-				//fmt.Printf("Setting active profile to: %s\n", profileName)
-
-				err = client.SetActiveProfile(profileName)
-				client.Close()
-
-				if err != nil {
-					log.Printf("Failed to set active profile to %s: %v", profileName, err)
-				} else {
-					for _, otherMenuItem := range profileItems {
-						otherMenuItem.Uncheck()
-					}
-					menuItem.Check()
-
-					if profileIcon, ok := assets.Images[profileName]; ok {
-						systray.SetIcon(profileIcon)
-					}
-				}
-			}
-		}(profileNames[i], item)
-	}
-
 	// Handle quit menu item
 	go func() {
 		<-quitItem.ClickedCh
 		systray.Quit()
 	}()
+}
+
+func getIconForProfile(profileName string) []byte {
+	if profileIcon, ok := assets.Images[profileName]; ok {
+		return profileIcon
+	} else {
+		//default icon
+		return assets.Images["balanced"]
+	}
 }

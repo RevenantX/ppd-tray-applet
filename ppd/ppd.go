@@ -73,12 +73,6 @@ func (c *Client) obj() dbus.BusObject {
 	return c.conn.Object(c.dest, c.path)
 }
 
-func nameHasOwner(conn *dbus.Conn, name string) (bool, error) {
-	var has bool
-	err := conn.BusObject().Call("org.freedesktop.DBus.NameHasOwner", 0, name).Store(&has)
-	return has, err
-}
-
 func detect(conn *dbus.Conn) (*Client, error) {
 	// Prefer the newer namespace if present, fallback to older.
 	candidates := []struct {
@@ -91,7 +85,9 @@ func detect(conn *dbus.Conn) (*Client, error) {
 	}
 
 	for _, cand := range candidates {
-		ok, err := nameHasOwner(conn, cand.dest)
+		//nameHasOwner
+		var ok bool
+		err := conn.BusObject().Call("org.freedesktop.DBus.NameHasOwner", 0, cand.dest).Store(&ok)
 		if err != nil {
 			return nil, err
 		}
