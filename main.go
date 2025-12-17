@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 	"tray-power-app/assets"
 	"tray-power-app/ppd"
 
@@ -32,6 +33,8 @@ func main() {
 }
 
 func onReady() {
+	time.Sleep(100 * time.Millisecond) // Ensure tray initialization
+
 	systray.SetTooltip("Power Profiles Daemon mini Tray applet")
 
 	active, err := dbusClient.ActiveProfile()
