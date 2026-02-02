@@ -102,6 +102,7 @@ func onReady() {
 	if err != nil {
 		log.Printf("Failed to subscribe to ActiveProfile changes: %v", err)
 	} else {
+		stopProfileWatch = stopWatch
 		go func() {
 			for activeProfile := range updates {
 				updateStatus(activeProfile)
@@ -116,7 +117,6 @@ func onReady() {
 	// Handle quit menu item
 	go func() {
 		<-quitItem.ClickedCh
-		stopWatch()
 		systray.Quit()
 	}()
 }
