@@ -67,6 +67,70 @@ func (c *Client) SetActiveProfile(profile string) error {
 	return c.obj().SetProperty(c.iface+".ActiveProfile", dbus.MakeVariant(profile))
 }
 
+func (c *Client) SubscribeActiveProfileChanges() (<-chan string, func(), error) {
+	if c.conn == nil {
+		return nil, nil, errors.New("dbus connection not initialized")
+	}
+
+	signalCh := make(chan *dbus.Signal, 10)
+	c.conn.Signal(signalCh)
+
+	addErr := c.conn.AddMatchSignal(
+		dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+		dbus.WithMatchMember("PropertiesChanged"),
+		dbus.WithMatchObjectPath(c.path),
+	)
+	if addErr != nil {
+		c.conn.RemoveSignal(signalCh)
+		return nil, nil, addErr
+	}
+
+	out := make(chan string, 5)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case <-done:
+				return
+			case sig := <-signalCh:
+				if sig == nil || len(sig.Body) < 3 {
+					continue
+				}
+
+				ifaceName, ok := sig.Body[0].(string)
+				if !ok || ifaceName != c.iface {
+					continue
+				}
+
+				changed, ok := sig.Body[1].(map[string]dbus.Variant)
+				if !ok {
+					continue
+				}
+
+				if v, ok := changed["ActiveProfile"]; ok {
+					if s, ok := v.Value().(string); ok {
+						out <- s
+					}
+				}
+			}
+		}
+	}()
+
+	stop := func() {
+		close(done)
+		c.conn.RemoveSignal(signalCh)
+		_ = c.conn.RemoveMatchSignal(
+			dbus.WithMatchInterface("org.freedesktop.DBus.Properties"),
+			dbus.WithMatchMember("PropertiesChanged"),
+			dbus.WithMatchObjectPath(c.path),
+		)
+	}
+
+	return out, stop, nil
+}
+
 // --- internals ---
 
 func (c *Client) obj() dbus.BusObject {

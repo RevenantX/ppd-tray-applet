@@ -12,6 +12,12 @@ import (
 )
 
 var dbusClient *ppd.Client
+var stopProfileWatch func()
+
+type MenuItemInfo struct {
+	menuItem *systray.MenuItem
+	name     string
+}
 
 func main() {
 	//connect to dbus
@@ -22,6 +28,9 @@ func main() {
 	}
 
 	onExit := func() {
+		if stopProfileWatch != nil {
+			stopProfileWatch()
+		}
 		if dbusClient != nil {
 			_ = dbusClient.Close()
 		}
@@ -33,6 +42,7 @@ func main() {
 }
 
 func onReady() {
+
 	time.Sleep(100 * time.Millisecond) // Ensure tray initialization
 
 	systray.SetTooltip("Power Profiles Daemon mini Tray applet")
@@ -41,7 +51,6 @@ func onReady() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	//fmt.Printf("ActiveProfile: %s\n\n", active)
 
 	profiles, err := dbusClient.Profiles()
 	if err != nil {
@@ -53,20 +62,27 @@ func onReady() {
 		fmt.Printf("  - %v (driver=%v)\n", m["Profile"], m["Driver"])
 	}
 
-	// Create menu items dynamically from available profiles
-	profileItems := make([]*systray.MenuItem, 0, len(profiles))
+	profileItems := make([]MenuItemInfo, 0, len(profiles))
 
+	updateStatus := func(activeProfile string) {
+		systray.SetIcon(getIconForProfile(activeProfile))
+		systray.SetTooltip(fmt.Sprintf("Power profile: %s", activeProfile))
+		for _, item := range profileItems {
+			if item.name == activeProfile {
+				item.menuItem.Check()
+			} else {
+				item.menuItem.Uncheck()
+			}
+		}
+	}
+
+	// Create menu items dynamically from available profiles
 	for _, m := range profiles {
 		profileName := m["Profile"].Value().(string)
 		profileItem := systray.AddMenuItemCheckbox(profileName, fmt.Sprintf("Set %s power profile", profileName), active == profileName)
-		profileIcon := getIconForProfile(profileName)
-		if active == profileName {
-			systray.SetIcon(profileIcon)
-			fmt.Printf("SetSystray icon: %s\n", profileName)
-		}
+		profileItem.SetIcon(getIconForProfile(profileName))
+		profileItems = append(profileItems, MenuItemInfo{menuItem: profileItem, name: profileName})
 
-		profileItem.SetIcon(profileIcon)
-		profileItems = append(profileItems, profileItem)
 		go func(profileName string, menuItem *systray.MenuItem) {
 			for range menuItem.ClickedCh {
 				if dbusClient == nil {
@@ -75,26 +91,32 @@ func onReady() {
 				}
 				if err := dbusClient.SetActiveProfile(profileName); err != nil {
 					log.Printf("Failed to set active profile to %s: %v", profileName, err)
-				} else {
-					for _, otherMenuItem := range profileItems {
-						otherMenuItem.Uncheck()
-					}
-					menuItem.Check()
-					systray.SetIcon(getIconForProfile(profileName))
 				}
 			}
 		}(profileName, profileItem)
 	}
 
-	// Add separator
-	systray.AddSeparator()
+	updateStatus(active)
+
+	updates, stopWatch, err := dbusClient.SubscribeActiveProfileChanges()
+	if err != nil {
+		log.Printf("Failed to subscribe to ActiveProfile changes: %v", err)
+	} else {
+		go func() {
+			for activeProfile := range updates {
+				updateStatus(activeProfile)
+			}
+		}()
+	}
 
 	// Create the quit menu item first (this is important)
+	systray.AddSeparator()
 	quitItem := systray.AddMenuItem("Quit", "Exit application")
 
 	// Handle quit menu item
 	go func() {
 		<-quitItem.ClickedCh
+		stopWatch()
 		systray.Quit()
 	}()
 }
